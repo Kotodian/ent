@@ -237,7 +237,7 @@ func (c *{{ $client }}) Query() *{{ $n.QueryName }} {
 {{ with $n.HasOneFieldID }}
 	// Get returns a {{ $n.Name }} entity by its id.
 	func (c *{{ $client }}) Get(ctx context.Context, id {{ $n.ID.Type }}) (*{{ $n.Name }}, error) {
-		return c.Query().Where({{ $n.Package }}.ID(id)).Only(ctx)
+		return c.Query().Unique(false).Where({{ $n.Package }}.ID(id)).Only(ctx)
 	}
 
 	// GetX is like Get, but panics if an error occurs.

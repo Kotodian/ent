@@ -78,9 +78,6 @@ func Open(t TestingT, driverName, dataSourceName string, opts ...Option) *{{ $pk
 		t.Error(err)
 		t.FailNow()
 	}
-	{{- if $.SupportMigrate }}
-		migrateSchema(t, c, o)
-	{{- end }}
 	return c
 }
 
@@ -88,9 +85,6 @@ func Open(t TestingT, driverName, dataSourceName string, opts ...Option) *{{ $pk
 func NewClient(t TestingT, opts ...Option) *{{ $pkg }}.Client {
 	o := newOptions(opts)
 	c := {{ $pkg }}.NewClient(o.opts...)
-	{{- if $.SupportMigrate }}
-		migrateSchema(t, c, o)
-	{{- end }}
 	return c
 }
 

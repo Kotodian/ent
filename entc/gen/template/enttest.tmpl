@@ -21,10 +21,6 @@ import (
 	// required by schema hooks.
 	_ "{{ $.Config.Package }}/runtime"
 
-	{{ if $.SupportMigrate }}
-		"{{ $.Config.Package }}/migrate"
-		"entgo.io/ent/dialect/sql/schema"
-	{{ end }}
 )
 
 type (
@@ -40,9 +36,6 @@ type (
 
 	options struct {
 		opts []{{ $pkg }}.Option
-		{{- if $.SupportMigrate }}
-			migrateOpts []schema.MigrateOption
-		{{- end }}
 	}
 )
 
@@ -53,14 +46,6 @@ func WithOptions(opts ...{{ $pkg }}.Option) Option {
 	}
 }
 
-{{- if $.SupportMigrate }}
-// WithMigrateOptions forwards options to auto migration.
-func WithMigrateOptions(opts ...schema.MigrateOption) Option {
-	return func(o *options) {
-		o.migrateOpts = append(o.migrateOpts, opts...)
-	}
-}
-{{- end }}
 
 func newOptions(opts []Option) *options {
 	o := &options{}

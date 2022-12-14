@@ -17,6 +17,7 @@ import (
 
 	"entgo.io/ent/entc/integration/edgeschema/ent/friendship"
 	"entgo.io/ent/entc/integration/edgeschema/ent/group"
+	"entgo.io/ent/entc/integration/edgeschema/ent/grouptag"
 	"entgo.io/ent/entc/integration/edgeschema/ent/relationship"
 	"entgo.io/ent/entc/integration/edgeschema/ent/relationshipinfo"
 	"entgo.io/ent/entc/integration/edgeschema/ent/role"
@@ -43,6 +44,8 @@ type Client struct {
 	Friendship *FriendshipClient
 	// Group is the client for interacting with the Group builders.
 	Group *GroupClient
+	// GroupTag is the client for interacting with the GroupTag builders.
+	GroupTag *GroupTagClient
 	// Relationship is the client for interacting with the Relationship builders.
 	Relationship *RelationshipClient
 	// RelationshipInfo is the client for interacting with the RelationshipInfo builders.
@@ -80,6 +83,7 @@ func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.Friendship = NewFriendshipClient(c.config)
 	c.Group = NewGroupClient(c.config)
+	c.GroupTag = NewGroupTagClient(c.config)
 	c.Relationship = NewRelationshipClient(c.config)
 	c.RelationshipInfo = NewRelationshipInfoClient(c.config)
 	c.Role = NewRoleClient(c.config)
@@ -126,6 +130,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		config:           cfg,
 		Friendship:       NewFriendshipClient(cfg),
 		Group:            NewGroupClient(cfg),
+		GroupTag:         NewGroupTagClient(cfg),
 		Relationship:     NewRelationshipClient(cfg),
 		RelationshipInfo: NewRelationshipInfoClient(cfg),
 		Role:             NewRoleClient(cfg),
@@ -158,6 +163,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		config:           cfg,
 		Friendship:       NewFriendshipClient(cfg),
 		Group:            NewGroupClient(cfg),
+		GroupTag:         NewGroupTagClient(cfg),
 		Relationship:     NewRelationshipClient(cfg),
 		RelationshipInfo: NewRelationshipInfoClient(cfg),
 		Role:             NewRoleClient(cfg),
@@ -199,6 +205,7 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	c.Friendship.Use(hooks...)
 	c.Group.Use(hooks...)
+	c.GroupTag.Use(hooks...)
 	c.Relationship.Use(hooks...)
 	c.RelationshipInfo.Use(hooks...)
 	c.Role.Use(hooks...)
@@ -210,6 +217,42 @@ func (c *Client) Use(hooks ...Hook) {
 	c.User.Use(hooks...)
 	c.UserGroup.Use(hooks...)
 	c.UserTweet.Use(hooks...)
+}
+
+// Mutate implements the ent.Mutator interface.
+func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
+	switch m := m.(type) {
+	case *FriendshipMutation:
+		return c.Friendship.mutate(ctx, m)
+	case *GroupMutation:
+		return c.Group.mutate(ctx, m)
+	case *GroupTagMutation:
+		return c.GroupTag.mutate(ctx, m)
+	case *RelationshipMutation:
+		return c.Relationship.mutate(ctx, m)
+	case *RelationshipInfoMutation:
+		return c.RelationshipInfo.mutate(ctx, m)
+	case *RoleMutation:
+		return c.Role.mutate(ctx, m)
+	case *RoleUserMutation:
+		return c.RoleUser.mutate(ctx, m)
+	case *TagMutation:
+		return c.Tag.mutate(ctx, m)
+	case *TweetMutation:
+		return c.Tweet.mutate(ctx, m)
+	case *TweetLikeMutation:
+		return c.TweetLike.mutate(ctx, m)
+	case *TweetTagMutation:
+		return c.TweetTag.mutate(ctx, m)
+	case *UserMutation:
+		return c.User.mutate(ctx, m)
+	case *UserGroupMutation:
+		return c.UserGroup.mutate(ctx, m)
+	case *UserTweetMutation:
+		return c.UserTweet.mutate(ctx, m)
+	default:
+		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
+	}
 }
 
 // FriendshipClient is a client for the Friendship schema.
@@ -334,6 +377,21 @@ func (c *FriendshipClient) Hooks() []Hook {
 	return c.hooks.Friendship
 }
 
+func (c *FriendshipClient) mutate(ctx context.Context, m *FriendshipMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&FriendshipCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&FriendshipUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&FriendshipUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&FriendshipDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Friendship mutation op: %q", m.Op())
+	}
+}
+
 // GroupClient is a client for the Group schema.
 type GroupClient struct {
 	config
@@ -435,6 +493,22 @@ func (c *GroupClient) QueryUsers(gr *Group) *UserQuery {
 	return query
 }
 
+// QueryTags queries the tags edge of a Group.
+func (c *GroupClient) QueryTags(gr *Group) *TagQuery {
+	query := &TagQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := gr.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(group.Table, group.FieldID, id),
+			sqlgraph.To(tag.Table, tag.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, true, group.TagsTable, group.TagsPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(gr.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryJoinedUsers queries the joined_users edge of a Group.
 func (c *GroupClient) QueryJoinedUsers(gr *Group) *UserGroupQuery {
 	query := &UserGroupQuery{config: c.config}
@@ -451,9 +525,177 @@ func (c *GroupClient) QueryJoinedUsers(gr *Group) *UserGroupQuery {
 	return query
 }
 
+// QueryGroupTags queries the group_tags edge of a Group.
+func (c *GroupClient) QueryGroupTags(gr *Group) *GroupTagQuery {
+	query := &GroupTagQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := gr.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(group.Table, group.FieldID, id),
+			sqlgraph.To(grouptag.Table, grouptag.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, group.GroupTagsTable, group.GroupTagsColumn),
+		)
+		fromV = sqlgraph.Neighbors(gr.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *GroupClient) Hooks() []Hook {
 	return c.hooks.Group
+}
+
+func (c *GroupClient) mutate(ctx context.Context, m *GroupMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GroupCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GroupUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GroupUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GroupDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Group mutation op: %q", m.Op())
+	}
+}
+
+// GroupTagClient is a client for the GroupTag schema.
+type GroupTagClient struct {
+	config
+}
+
+// NewGroupTagClient returns a client for the GroupTag from the given config.
+func NewGroupTagClient(c config) *GroupTagClient {
+	return &GroupTagClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `grouptag.Hooks(f(g(h())))`.
+func (c *GroupTagClient) Use(hooks ...Hook) {
+	c.hooks.GroupTag = append(c.hooks.GroupTag, hooks...)
+}
+
+// Create returns a builder for creating a GroupTag entity.
+func (c *GroupTagClient) Create() *GroupTagCreate {
+	mutation := newGroupTagMutation(c.config, OpCreate)
+	return &GroupTagCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of GroupTag entities.
+func (c *GroupTagClient) CreateBulk(builders ...*GroupTagCreate) *GroupTagCreateBulk {
+	return &GroupTagCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for GroupTag.
+func (c *GroupTagClient) Update() *GroupTagUpdate {
+	mutation := newGroupTagMutation(c.config, OpUpdate)
+	return &GroupTagUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *GroupTagClient) UpdateOne(gt *GroupTag) *GroupTagUpdateOne {
+	mutation := newGroupTagMutation(c.config, OpUpdateOne, withGroupTag(gt))
+	return &GroupTagUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *GroupTagClient) UpdateOneID(id int) *GroupTagUpdateOne {
+	mutation := newGroupTagMutation(c.config, OpUpdateOne, withGroupTagID(id))
+	return &GroupTagUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for GroupTag.
+func (c *GroupTagClient) Delete() *GroupTagDelete {
+	mutation := newGroupTagMutation(c.config, OpDelete)
+	return &GroupTagDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *GroupTagClient) DeleteOne(gt *GroupTag) *GroupTagDeleteOne {
+	return c.DeleteOneID(gt.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *GroupTagClient) DeleteOneID(id int) *GroupTagDeleteOne {
+	builder := c.Delete().Where(grouptag.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &GroupTagDeleteOne{builder}
+}
+
+// Query returns a query builder for GroupTag.
+func (c *GroupTagClient) Query() *GroupTagQuery {
+	return &GroupTagQuery{
+		config: c.config,
+	}
+}
+
+// Get returns a GroupTag entity by its id.
+func (c *GroupTagClient) Get(ctx context.Context, id int) (*GroupTag, error) {
+	return c.Query().Where(grouptag.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *GroupTagClient) GetX(ctx context.Context, id int) *GroupTag {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryTag queries the tag edge of a GroupTag.
+func (c *GroupTagClient) QueryTag(gt *GroupTag) *TagQuery {
+	query := &TagQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := gt.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(grouptag.Table, grouptag.FieldID, id),
+			sqlgraph.To(tag.Table, tag.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, grouptag.TagTable, grouptag.TagColumn),
+		)
+		fromV = sqlgraph.Neighbors(gt.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryGroup queries the group edge of a GroupTag.
+func (c *GroupTagClient) QueryGroup(gt *GroupTag) *GroupQuery {
+	query := &GroupQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := gt.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(grouptag.Table, grouptag.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, grouptag.GroupTable, grouptag.GroupColumn),
+		)
+		fromV = sqlgraph.Neighbors(gt.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *GroupTagClient) Hooks() []Hook {
+	return c.hooks.GroupTag
+}
+
+func (c *GroupTagClient) mutate(ctx context.Context, m *GroupTagMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&GroupTagCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&GroupTagUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&GroupTagUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&GroupTagDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown GroupTag mutation op: %q", m.Op())
+	}
 }
 
 // RelationshipClient is a client for the Relationship schema.
@@ -533,7 +775,23 @@ func (c *RelationshipClient) QueryInfo(r *Relationship) *RelationshipInfoQuery {
 
 // Hooks returns the client hooks.
 func (c *RelationshipClient) Hooks() []Hook {
-	return c.hooks.Relationship
+	hooks := c.hooks.Relationship
+	return append(hooks[:len(hooks):len(hooks)], relationship.Hooks[:]...)
+}
+
+func (c *RelationshipClient) mutate(ctx context.Context, m *RelationshipMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RelationshipCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RelationshipUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RelationshipUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RelationshipDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Relationship mutation op: %q", m.Op())
+	}
 }
 
 // RelationshipInfoClient is a client for the RelationshipInfo schema.
@@ -624,6 +882,21 @@ func (c *RelationshipInfoClient) GetX(ctx context.Context, id int) *Relationship
 // Hooks returns the client hooks.
 func (c *RelationshipInfoClient) Hooks() []Hook {
 	return c.hooks.RelationshipInfo
+}
+
+func (c *RelationshipInfoClient) mutate(ctx context.Context, m *RelationshipInfoMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RelationshipInfoCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RelationshipInfoUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RelationshipInfoUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RelationshipInfoDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown RelationshipInfo mutation op: %q", m.Op())
+	}
 }
 
 // RoleClient is a client for the Role schema.
@@ -748,6 +1021,21 @@ func (c *RoleClient) Hooks() []Hook {
 	return c.hooks.Role
 }
 
+func (c *RoleClient) mutate(ctx context.Context, m *RoleMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RoleCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RoleUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RoleUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RoleDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Role mutation op: %q", m.Op())
+	}
+}
+
 // RoleUserClient is a client for the RoleUser schema.
 type RoleUserClient struct {
 	config
@@ -819,6 +1107,21 @@ func (c *RoleUserClient) QueryUser(ru *RoleUser) *UserQuery {
 // Hooks returns the client hooks.
 func (c *RoleUserClient) Hooks() []Hook {
 	return c.hooks.RoleUser
+}
+
+func (c *RoleUserClient) mutate(ctx context.Context, m *RoleUserMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RoleUserCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RoleUserUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RoleUserUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RoleUserDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown RoleUser mutation op: %q", m.Op())
+	}
 }
 
 // TagClient is a client for the Tag schema.
@@ -922,6 +1225,22 @@ func (c *TagClient) QueryTweets(t *Tag) *TweetQuery {
 	return query
 }
 
+// QueryGroups queries the groups edge of a Tag.
+func (c *TagClient) QueryGroups(t *Tag) *GroupQuery {
+	query := &GroupQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := t.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tag.Table, tag.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, false, tag.GroupsTable, tag.GroupsPrimaryKey...),
+		)
+		fromV = sqlgraph.Neighbors(t.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryTweetTags queries the tweet_tags edge of a Tag.
 func (c *TagClient) QueryTweetTags(t *Tag) *TweetTagQuery {
 	query := &TweetTagQuery{config: c.config}
@@ -938,9 +1257,40 @@ func (c *TagClient) QueryTweetTags(t *Tag) *TweetTagQuery {
 	return query
 }
 
+// QueryGroupTags queries the group_tags edge of a Tag.
+func (c *TagClient) QueryGroupTags(t *Tag) *GroupTagQuery {
+	query := &GroupTagQuery{config: c.config}
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := t.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(tag.Table, tag.FieldID, id),
+			sqlgraph.To(grouptag.Table, grouptag.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, true, tag.GroupTagsTable, tag.GroupTagsColumn),
+		)
+		fromV = sqlgraph.Neighbors(t.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *TagClient) Hooks() []Hook {
 	return c.hooks.Tag
+}
+
+func (c *TagClient) mutate(ctx context.Context, m *TagMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TagCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TagUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TagUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TagDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Tag mutation op: %q", m.Op())
+	}
 }
 
 // TweetClient is a client for the Tweet schema.
@@ -1129,6 +1479,21 @@ func (c *TweetClient) Hooks() []Hook {
 	return c.hooks.Tweet
 }
 
+func (c *TweetClient) mutate(ctx context.Context, m *TweetMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TweetCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TweetUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TweetUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TweetDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Tweet mutation op: %q", m.Op())
+	}
+}
+
 // TweetLikeClient is a client for the TweetLike schema.
 type TweetLikeClient struct {
 	config
@@ -1201,6 +1566,21 @@ func (c *TweetLikeClient) QueryUser(tl *TweetLike) *UserQuery {
 func (c *TweetLikeClient) Hooks() []Hook {
 	hooks := c.hooks.TweetLike
 	return append(hooks[:len(hooks):len(hooks)], tweetlike.Hooks[:]...)
+}
+
+func (c *TweetLikeClient) mutate(ctx context.Context, m *TweetLikeMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TweetLikeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TweetLikeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TweetLikeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TweetLikeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TweetLike mutation op: %q", m.Op())
+	}
 }
 
 // TweetTagClient is a client for the TweetTag schema.
@@ -1323,6 +1703,21 @@ func (c *TweetTagClient) QueryTweet(tt *TweetTag) *TweetQuery {
 // Hooks returns the client hooks.
 func (c *TweetTagClient) Hooks() []Hook {
 	return c.hooks.TweetTag
+}
+
+func (c *TweetTagClient) mutate(ctx context.Context, m *TweetTagMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TweetTagCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TweetTagUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TweetTagUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TweetTagDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TweetTag mutation op: %q", m.Op())
+	}
 }
 
 // UserClient is a client for the User schema.
@@ -1608,6 +2003,21 @@ func (c *UserClient) Hooks() []Hook {
 	return append(hooks[:len(hooks):len(hooks)], user.Hooks[:]...)
 }
 
+func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown User mutation op: %q", m.Op())
+	}
+}
+
 // UserGroupClient is a client for the UserGroup schema.
 type UserGroupClient struct {
 	config
@@ -1730,6 +2140,21 @@ func (c *UserGroupClient) Hooks() []Hook {
 	return c.hooks.UserGroup
 }
 
+func (c *UserGroupClient) mutate(ctx context.Context, m *UserGroupMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserGroupCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserGroupUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserGroupUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserGroupDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserGroup mutation op: %q", m.Op())
+	}
+}
+
 // UserTweetClient is a client for the UserTweet schema.
 type UserTweetClient struct {
 	config
@@ -1850,4 +2275,19 @@ func (c *UserTweetClient) QueryTweet(ut *UserTweet) *TweetQuery {
 // Hooks returns the client hooks.
 func (c *UserTweetClient) Hooks() []Hook {
 	return c.hooks.UserTweet
+}
+
+func (c *UserTweetClient) mutate(ctx context.Context, m *UserTweetMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserTweetCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserTweetUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserTweetUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserTweetDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserTweet mutation op: %q", m.Op())
+	}
 }

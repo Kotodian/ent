@@ -10,6 +10,18 @@ on:
       - 'doc/**'
 
 jobs:
+  typos-check:
+    name: Spell Check with Typos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Actions Repository
+        uses: actions/checkout@v3
+      - name: Check spelling with custom config file
+        uses: crate-ci/typos@v1.13.10
+        with:
+          config: .github/workflows/typos.toml
+
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -18,9 +30,9 @@ jobs:
         with:
           go-version: 1.19
       - name: Run linters
-        uses: golangci/golangci-lint-action@v3.3.1
+        uses: golangci/golangci-lint-action@v3.4.0
         with:
-          version: v1.48.0
+          version: v1.50.1 # The next version requires Go 1.20
 
   unit:
     runs-on: ubuntu-latest
@@ -38,6 +50,9 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+      - name: Run cmd tests
+        run: go test -race ./...
+        working-directory: cmd
       - name: Run dialect tests
         run: go test -race ./...
         working-directory: dialect
@@ -60,7 +75,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
         with:
-          go-version: '1.19.3'
+          go-version: '1.20'
       - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod
@@ -68,12 +83,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
       - name: Run go generate
-        run: go generate ./...
+        run: go generate ./... && go mod tidy
+      - name: Run go generate on examples directory
+        working-directory: examples
+        run: go generate ./... && go mod tidy
+      - name: Run go generate on integration directory
+        working-directory: entc/integration
+        run: go generate ./... && go mod tidy
       - name: Check generated files
         run: |
           status=$(git status --porcelain)
           if [ -n "$status" ]; then
-            echo "you need to run 'go generate ./...' and commit the changes"
+            echo "you need to run 'go generate ./...' in root and 'examples' dirs and commit the changes"
             echo "$status"
             git --no-pager diff
             exit 1
@@ -245,7 +266,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
         with:
-          go-version: '1.18'
+          go-version: '1.20'
       - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod
@@ -425,7 +446,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v3
         with:
-          go-version: '1.18'
+          go-version: '1.20'
       - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod

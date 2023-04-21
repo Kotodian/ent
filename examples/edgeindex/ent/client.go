@@ -12,14 +12,14 @@ import (
 	"fmt"
 	"log"
 
+	"entgo.io/ent"
 	"entgo.io/ent/examples/edgeindex/ent/migrate"
-
-	"entgo.io/ent/examples/edgeindex/ent/city"
-	"entgo.io/ent/examples/edgeindex/ent/street"
 
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"entgo.io/ent/examples/edgeindex/ent/city"
+	"entgo.io/ent/examples/edgeindex/ent/street"
 )
 
 // Client is the client that holds all ent builders.
@@ -35,7 +35,7 @@ type Client struct {
 
 // NewClient creates a new client configured with the given options.
 func NewClient(opts ...Option) *Client {
-	cfg := config{log: log.Println, hooks: &hooks{}}
+	cfg := config{log: log.Println, hooks: &hooks{}, inters: &inters{}}
 	cfg.options(opts...)
 	client := &Client{config: cfg}
 	client.init()
@@ -46,6 +46,55 @@ func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.City = NewCityClient(c.config)
 	c.Street = NewStreetClient(c.config)
+}
+
+type (
+	// config is the configuration for the client and its builder.
+	config struct {
+		// driver used for executing database requests.
+		driver dialect.Driver
+		// debug enable a debug logging.
+		debug bool
+		// log used for logging on debug mode.
+		log func(...any)
+		// hooks to execute on mutations.
+		hooks *hooks
+		// interceptors to execute on queries.
+		inters *inters
+	}
+	// Option function to configure the client.
+	Option func(*config)
+)
+
+// options applies the options on the config object.
+func (c *config) options(opts ...Option) {
+	for _, opt := range opts {
+		opt(c)
+	}
+	if c.debug {
+		c.driver = dialect.Debug(c.driver, c.log)
+	}
+}
+
+// Debug enables debug logging on the ent.Driver.
+func Debug() Option {
+	return func(c *config) {
+		c.debug = true
+	}
+}
+
+// Log sets the logging function for debug mode.
+func Log(fn func(...any)) Option {
+	return func(c *config) {
+		c.log = fn
+	}
+}
+
+// Driver configures the client driver.
+func Driver(driver dialect.Driver) Option {
+	return func(c *config) {
+		c.driver = driver
+	}
 }
 
 // Open opens a database/sql.DB specified by the driver name and
@@ -134,6 +183,13 @@ func (c *Client) Use(hooks ...Hook) {
 	c.Street.Use(hooks...)
 }
 
+// Intercept adds the query interceptors to all the entity clients.
+// In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
+func (c *Client) Intercept(interceptors ...Interceptor) {
+	c.City.Intercept(interceptors...)
+	c.Street.Intercept(interceptors...)
+}
+
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
@@ -160,6 +216,12 @@ func NewCityClient(c config) *CityClient {
 // A call to `Use(f, g, h)` equals to `city.Hooks(f(g(h())))`.
 func (c *CityClient) Use(hooks ...Hook) {
 	c.hooks.City = append(c.hooks.City, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `city.Intercept(f(g(h())))`.
+func (c *CityClient) Intercept(interceptors ...Interceptor) {
+	c.inters.City = append(c.inters.City, interceptors...)
 }
 
 // Create returns a builder for creating a City entity.
@@ -214,6 +276,8 @@ func (c *CityClient) DeleteOneID(id int) *CityDeleteOne {
 func (c *CityClient) Query() *CityQuery {
 	return &CityQuery{
 		config: c.config,
+		ctx:    &QueryContext{Type: TypeCity},
+		inters: c.Interceptors(),
 	}
 }
 
@@ -233,7 +297,7 @@ func (c *CityClient) GetX(ctx context.Context, id int) *City {
 
 // QueryStreets queries the streets edge of a City.
 func (c *CityClient) QueryStreets(ci *City) *StreetQuery {
-	query := &StreetQuery{config: c.config}
+	query := (&StreetClient{config: c.config}).Query()
 	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
 		id := ci.ID
 		step := sqlgraph.NewStep(
@@ -250,6 +314,11 @@ func (c *CityClient) QueryStreets(ci *City) *StreetQuery {
 // Hooks returns the client hooks.
 func (c *CityClient) Hooks() []Hook {
 	return c.hooks.City
+}
+
+// Interceptors returns the client interceptors.
+func (c *CityClient) Interceptors() []Interceptor {
+	return c.inters.City
 }
 
 func (c *CityClient) mutate(ctx context.Context, m *CityMutation) (Value, error) {
@@ -281,6 +350,12 @@ func NewStreetClient(c config) *StreetClient {
 // A call to `Use(f, g, h)` equals to `street.Hooks(f(g(h())))`.
 func (c *StreetClient) Use(hooks ...Hook) {
 	c.hooks.Street = append(c.hooks.Street, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `street.Intercept(f(g(h())))`.
+func (c *StreetClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Street = append(c.inters.Street, interceptors...)
 }
 
 // Create returns a builder for creating a Street entity.
@@ -335,6 +410,8 @@ func (c *StreetClient) DeleteOneID(id int) *StreetDeleteOne {
 func (c *StreetClient) Query() *StreetQuery {
 	return &StreetQuery{
 		config: c.config,
+		ctx:    &QueryContext{Type: TypeStreet},
+		inters: c.Interceptors(),
 	}
 }
 
@@ -354,7 +431,7 @@ func (c *StreetClient) GetX(ctx context.Context, id int) *Street {
 
 // QueryCity queries the city edge of a Street.
 func (c *StreetClient) QueryCity(s *Street) *CityQuery {
-	query := &CityQuery{config: c.config}
+	query := (&CityClient{config: c.config}).Query()
 	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
 		id := s.ID
 		step := sqlgraph.NewStep(
@@ -373,6 +450,11 @@ func (c *StreetClient) Hooks() []Hook {
 	return c.hooks.Street
 }
 
+// Interceptors returns the client interceptors.
+func (c *StreetClient) Interceptors() []Interceptor {
+	return c.inters.Street
+}
+
 func (c *StreetClient) mutate(ctx context.Context, m *StreetMutation) (Value, error) {
 	switch m.Op() {
 	case OpCreate:
@@ -387,3 +469,13 @@ func (c *StreetClient) mutate(ctx context.Context, m *StreetMutation) (Value, er
 		return nil, fmt.Errorf("ent: unknown Street mutation op: %q", m.Op())
 	}
 }
+
+// hooks and interceptors per client, for fast access.
+type (
+	hooks struct {
+		City, Street []ent.Hook
+	}
+	inters struct {
+		City, Street []ent.Interceptor
+	}
+)

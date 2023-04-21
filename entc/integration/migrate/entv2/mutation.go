@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"entgo.io/ent"
+	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/entc/integration/migrate/entv2/blog"
 	"entgo.io/ent/entc/integration/migrate/entv2/car"
 	"entgo.io/ent/entc/integration/migrate/entv2/conversion"
@@ -21,8 +23,6 @@ import (
 	"entgo.io/ent/entc/integration/migrate/entv2/pet"
 	"entgo.io/ent/entc/integration/migrate/entv2/predicate"
 	"entgo.io/ent/entc/integration/migrate/entv2/user"
-
-	"entgo.io/ent"
 )
 
 const (
@@ -51,6 +51,8 @@ type BlogMutation struct {
 	op            Op
 	typ           string
 	id            *int
+	oid           *int
+	addoid        *int
 	clearedFields map[string]struct{}
 	admins        map[int]struct{}
 	removedadmins map[int]struct{}
@@ -164,6 +166,62 @@ func (m *BlogMutation) IDs(ctx context.Context) ([]int, error) {
 	}
 }
 
+// SetOid sets the "oid" field.
+func (m *BlogMutation) SetOid(i int) {
+	m.oid = &i
+	m.addoid = nil
+}
+
+// Oid returns the value of the "oid" field in the mutation.
+func (m *BlogMutation) Oid() (r int, exists bool) {
+	v := m.oid
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOid returns the old "oid" field's value of the Blog entity.
+// If the Blog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BlogMutation) OldOid(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOid is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOid requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOid: %w", err)
+	}
+	return oldValue.Oid, nil
+}
+
+// AddOid adds i to the "oid" field.
+func (m *BlogMutation) AddOid(i int) {
+	if m.addoid != nil {
+		*m.addoid += i
+	} else {
+		m.addoid = &i
+	}
+}
+
+// AddedOid returns the value that was added to the "oid" field in this mutation.
+func (m *BlogMutation) AddedOid() (r int, exists bool) {
+	v := m.addoid
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOid resets all changes to the "oid" field.
+func (m *BlogMutation) ResetOid() {
+	m.oid = nil
+	m.addoid = nil
+}
+
 // AddAdminIDs adds the "admins" edge to the User entity by ids.
 func (m *BlogMutation) AddAdminIDs(ids ...int) {
 	if m.admins == nil {
@@ -223,6 +281,16 @@ func (m *BlogMutation) Where(ps ...predicate.Blog) {
 	m.predicates = append(m.predicates, ps...)
 }
 
+// WhereP appends storage-level predicates to the BlogMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *BlogMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Blog, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
 // Op returns the operation name.
 func (m *BlogMutation) Op() Op {
 	return m.op
@@ -242,7 +310,10 @@ func (m *BlogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *BlogMutation) Fields() []string {
-	fields := make([]string, 0, 0)
+	fields := make([]string, 0, 1)
+	if m.oid != nil {
+		fields = append(fields, blog.FieldOid)
+	}
 	return fields
 }
 
@@ -250,6 +321,10 @@ func (m *BlogMutation) Fields() []string {
 // return value indicates that this field was not set, or was not defined in the
 // schema.
 func (m *BlogMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case blog.FieldOid:
+		return m.Oid()
+	}
 	return nil, false
 }
 
@@ -257,6 +332,10 @@ func (m *BlogMutation) Field(name string) (ent.Value, bool) {
 // returned if the mutation operation is not UpdateOne, or the query to the
 // database failed.
 func (m *BlogMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case blog.FieldOid:
+		return m.OldOid(ctx)
+	}
 	return nil, fmt.Errorf("unknown Blog field %s", name)
 }
 
@@ -265,6 +344,13 @@ func (m *BlogMutation) OldField(ctx context.Context, name string) (ent.Value, er
 // type.
 func (m *BlogMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case blog.FieldOid:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOid(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Blog field %s", name)
 }
@@ -272,13 +358,21 @@ func (m *BlogMutation) SetField(name string, value ent.Value) error {
 // AddedFields returns all numeric fields that were incremented/decremented during
 // this mutation.
 func (m *BlogMutation) AddedFields() []string {
-	return nil
+	var fields []string
+	if m.addoid != nil {
+		fields = append(fields, blog.FieldOid)
+	}
+	return fields
 }
 
 // AddedField returns the numeric value that was incremented/decremented on a field
 // with the given name. The second boolean return value indicates that this field
 // was not set, or was not defined in the schema.
 func (m *BlogMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case blog.FieldOid:
+		return m.AddedOid()
+	}
 	return nil, false
 }
 
@@ -286,6 +380,15 @@ func (m *BlogMutation) AddedField(name string) (ent.Value, bool) {
 // the field is not defined in the schema, or if the type mismatched the field
 // type.
 func (m *BlogMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case blog.FieldOid:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOid(v)
+		return nil
+	}
 	return fmt.Errorf("unknown Blog numeric field %s", name)
 }
 
@@ -311,6 +414,11 @@ func (m *BlogMutation) ClearField(name string) error {
 // ResetField resets all changes in the mutation for the field with the given name.
 // It returns an error if the field is not defined in the schema.
 func (m *BlogMutation) ResetField(name string) error {
+	switch name {
+	case blog.FieldOid:
+		m.ResetOid()
+		return nil
+	}
 	return fmt.Errorf("unknown Blog field %s", name)
 }
 
@@ -602,6 +710,16 @@ func (m *CarMutation) ResetOwner() {
 // Where appends a list predicates to the CarMutation builder.
 func (m *CarMutation) Where(ps ...predicate.Car) {
 	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the CarMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *CarMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Car, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
 }
 
 // Op returns the operation name.
@@ -1368,6 +1486,16 @@ func (m *ConversionMutation) Where(ps ...predicate.Conversion) {
 	m.predicates = append(m.predicates, ps...)
 }
 
+// WhereP appends storage-level predicates to the ConversionMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ConversionMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Conversion, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
 // Op returns the operation name.
 func (m *ConversionMutation) Op() Op {
 	return m.op
@@ -1990,6 +2118,16 @@ func (m *CustomTypeMutation) Where(ps ...predicate.CustomType) {
 	m.predicates = append(m.predicates, ps...)
 }
 
+// WhereP appends storage-level predicates to the CustomTypeMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *CustomTypeMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.CustomType, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
 // Op returns the operation name.
 func (m *CustomTypeMutation) Op() Op {
 	return m.op
@@ -2322,6 +2460,16 @@ func (m *GroupMutation) IDs(ctx context.Context) ([]int, error) {
 // Where appends a list predicates to the GroupMutation builder.
 func (m *GroupMutation) Where(ps ...predicate.Group) {
 	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the GroupMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *GroupMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Group, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
 }
 
 // Op returns the operation name.
@@ -2726,6 +2874,16 @@ func (m *MediaMutation) ResetText() {
 // Where appends a list predicates to the MediaMutation builder.
 func (m *MediaMutation) Where(ps ...predicate.Media) {
 	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the MediaMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *MediaMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Media, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
 }
 
 // Op returns the operation name.
@@ -3151,6 +3309,16 @@ func (m *PetMutation) ResetOwner() {
 // Where appends a list predicates to the PetMutation builder.
 func (m *PetMutation) Where(ps ...predicate.Pet) {
 	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the PetMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *PetMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Pet, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
 }
 
 // Op returns the operation name.
@@ -4573,6 +4741,16 @@ func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
 }
 
+// WhereP appends storage-level predicates to the UserMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UserMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.User, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
 // Op returns the operation name.
 func (m *UserMutation) Op() Op {
 	return m.op
@@ -5354,6 +5532,16 @@ func (m *ZooMutation) IDs(ctx context.Context) ([]int, error) {
 // Where appends a list predicates to the ZooMutation builder.
 func (m *ZooMutation) Where(ps ...predicate.Zoo) {
 	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ZooMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ZooMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Zoo, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
 }
 
 // Op returns the operation name.

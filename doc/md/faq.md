@@ -221,7 +221,7 @@ option for doing it as follows:
 
 #### How to define a network address field in PostgreSQL?
 
-The [GoType](schema-fields.md#go-type) and the [SchemaType](schema-fields.md#database-type)
+The [GoType](schema-fields.mdx#go-type) and the [SchemaType](schema-fields.mdx#database-type)
 options allow users to define database-specific fields. For example, in order to define a
  [`macaddr`](https://www.postgresql.org/docs/13/datatype-net-types.html#DATATYPE-MACADDR) field, use the following configuration:
 
@@ -340,7 +340,7 @@ To achieve this, you can either make use of `DefaultFunc` or of schema hooks -
 depending on your use case. If the generator does not return an error,
 `DefaultFunc` is more concise, whereas setting a hook on resource creation
 will allow you to capture errors as well. An example of how to use
-`DefaultFunc` can be seen in the section regarding [the ID field](schema-fields.md#id-field).
+`DefaultFunc` can be seen in the section regarding [the ID field](schema-fields.mdx#id-field).
 
 Here is an example of how to use a custom generator with hooks, taking as an
 example [sonyflake](https://github.com/sony/sonyflake).
@@ -405,7 +405,7 @@ func (User) Mixin() []ent.Mixin {
 Package [xid](https://github.com/rs/xid) is a globally unique ID generator library that uses the [Mongo Object ID](https://docs.mongodb.org/manual/reference/object-id/)
 algorithm to generate a 12 byte, 20 character ID with no configuration. The xid package comes with [database/sql](https://pkg.go.dev/database/sql) `sql.Scanner` and `driver.Valuer` interfaces required by Ent for serialization.
 
-To store an XID in any string field use the [GoType](schema-fields.md#go-type) schema configuration:
+To store an XID in any string field use the [GoType](schema-fields.mdx#go-type) schema configuration:
 
 ```go
 // Fields of type T.
@@ -462,7 +462,7 @@ In order to use extended identifiers (XIDs) with gqlgen, follow the configuratio
 
 #### How to define a spatial data type field in MySQL?
 
-The [GoType](schema-fields.md#go-type) and the [SchemaType](schema-fields.md#database-type)
+The [GoType](schema-fields.mdx#go-type) and the [SchemaType](schema-fields.mdx#database-type)
 options allow users to define database-specific fields. For example, in order to define a
 [`POINT`](https://dev.mysql.com/doc/refman/8.0/en/spatial-type-overview.html) field, use the following configuration:
 
@@ -663,7 +663,7 @@ func (User) Annotations() []schema.Annotation {
 
 #### How to define a custom precision numeric field?
 
-Using [GoType](schema-fields.md#go-type) and [SchemaType](schema-fields.md#database-type) it is possible to define
+Using [GoType](schema-fields.mdx#go-type) and [SchemaType](schema-fields.mdx#database-type) it is possible to define
 custom precision numeric fields. For example, defining a field that uses [big.Int](https://pkg.go.dev/math/big).
 
 ```go
@@ -723,7 +723,6 @@ func main() {
 	// Use the client here.
 }
 
-
 type multiDriver struct {
 	r, w dialect.Driver
 }
@@ -731,7 +730,12 @@ type multiDriver struct {
 var _ dialect.Driver = (*multiDriver)(nil)
 
 func (d *multiDriver) Query(ctx context.Context, query string, args, v any) error {
-	return d.r.Query(ctx, query, args, v)
+	e := d.r
+	// Mutation statements that use the RETURNING clause.
+	if ent.QueryFromContext(ctx) == nil {
+		e = d.w
+	}
+	return e.Query(ctx, query, args, v)
 }
 
 func (d *multiDriver) Exec(ctx context.Context, query string, args, v any) error {
@@ -758,6 +762,10 @@ func (d *multiDriver) Close() error {
 		return werr
 	}
 	return nil
+}
+
+func (d *multiDriver) Dialect() string {
+	return d.r.Dialect()
 }
 ```
 
@@ -827,17 +835,19 @@ func (e *EncodeExtension) Templates() []*gen.Template {
 	return []*gen.Template{
 		gen.MustParse(gen.NewTemplate("model/additional/jsonencode").
 			Parse(`
-// MarshalJSON implements the json.Marshaler interface.
-func ({{ $.Receiver }} *{{ $.Name }}) MarshalJSON() ([]byte, error) {
-	type Alias {{ $.Name }}
-	return json.Marshal(&struct {
-		*Alias
-		{{ $.Name }}Edges
-	}{
-		Alias: (*Alias)({{ $.Receiver }}),
-		{{ $.Name }}Edges: {{ $.Receiver }}.Edges,
-	})
-}
+{{ if $.Edges }}
+	// MarshalJSON implements the json.Marshaler interface.
+	func ({{ $.Receiver }} *{{ $.Name }}) MarshalJSON() ([]byte, error) {
+		type Alias {{ $.Name }}
+		return json.Marshal(&struct {
+			*Alias
+			{{ $.Name }}Edges
+		}{
+			Alias: (*Alias)({{ $.Receiver }}),
+			{{ $.Name }}Edges: {{ $.Receiver }}.Edges,
+		})
+	}
+{{ end }}
 `)),
 	}
 }

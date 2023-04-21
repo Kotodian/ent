@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"ariga.io/atlas/sql/migrate"
-
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqljson"
 
+	"ariga.io/atlas/sql/migrate"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,10 +55,10 @@ func TestWriteDriver(t *testing.T) {
 
 	b.Reset()
 	w = NewWriteDriver(dialect.Postgres, b)
-	query, args = sql.Dialect(dialect.Postgres).Update("users").Set("a", 1).Set("b", time.Now()).Query()
+	query, args = sql.Dialect(dialect.Postgres).Update("users").Set("id", uuid.Nil).Set("a", 1).Set("b", time.Now()).Query()
 	err = w.Exec(ctx, query, args, nil)
 	require.NoError(t, err)
-	require.Equal(t, `UPDATE "users" SET "a" = 1, "b" = {{ TIME_VALUE }};`+"\n", b.String())
+	require.Equal(t, `UPDATE "users" SET "id" = '00000000-0000-0000-0000-000000000000', "a" = 1, "b" = {{ TIME_VALUE }};`+"\n", b.String())
 
 	b.Reset()
 	err = w.Exec(ctx, `INSERT INTO "users" (name) VALUES("a8m") RETURNING id`, nil, nil)
@@ -70,25 +70,120 @@ func TestWriteDriver(t *testing.T) {
 	err = w.Query(ctx, `INSERT INTO "users" (name) VALUES("a8m") RETURNING id`, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, `INSERT INTO "users" (name) VALUES("a8m") RETURNING id;`+"\n", b.String())
+
+	// correct columns are extracted from a returning clause and returned by sql.ColumnScanner.
+	for q, cols := range map[string][]string{
+		`INSERT INTO "users" (name) VALUES("a8m") RETURNING id`:                          {"id"},
+		`INSERT INTO "users" (name) VALUES("a8m") RETURNING id, "name"`:                  {"id", `"name"`},
+		`INSERT INTO "users" (name) VALUES("a8m") RETURNING "id", "name"`:                {`"id"`, `"name"`},
+		`INSERT INTO "users" (name) VALUES("a8m") RETURNING "id", "name"; DROP "groups"`: {`"id"`, `"name"`},
+	} {
+		var rows sql.Rows
+		err = w.Query(ctx, q, nil, &rows)
+		require.NoError(t, err)
+		require.True(t, rows.Next())
+		c, err := rows.Columns()
+		require.NoError(t, err)
+		require.Equal(t, cols, c)
+		require.NoError(t, rows.Scan())
+	}
+	b.Reset()
 }
 
 func TestDirWriter(t *testing.T) {
-	p := t.TempDir()
-	dir, err := migrate.NewLocalDir(p)
-	require.NoError(t, err)
-	w := &DirWriter{Dir: dir}
-	drv := NewWriteDriver(dialect.MySQL, w)
-	require.NoError(t, drv.Exec(context.Background(), "UPDATE `test`.`users` SET `a` = ?", []any{1}, nil))
-	w.Change("Comment 1.")
-	require.NoError(t, drv.Exec(context.Background(), "UPDATE `test`.`users` SET `b` = ?", []any{2}, nil))
-	w.Change("Comment 2.")
-	require.NoError(t, w.Flush("migration_file"))
-	files, err := os.ReadDir(p)
-	require.NoError(t, err)
-	require.Len(t, files, 2)
-	require.Contains(t, files[0].Name(), "_migration_file.sql")
-	buf, err := os.ReadFile(filepath.Join(p, files[0].Name()))
-	require.NoError(t, err)
-	require.Equal(t, "-- Comment 1.\nUPDATE `test`.`users` SET `a` = 1;\n-- Comment 2.\nUPDATE `test`.`users` SET `b` = 2;\n", string(buf))
-	require.Equal(t, "atlas.sum", files[1].Name())
+	for _, tt := range []struct {
+		dialect  string
+		exec     []string
+		comments []string
+		args     [][]any
+		want     string
+	}{
+		{
+			dialect.MySQL,
+			[]string{
+				"UPDATE `test`.`users` SET `a` = ?",
+				"UPDATE `test`.`users` SET `b` = ?",
+			},
+			[]string{
+				"Comment 1.",
+				"Comment 2.",
+			},
+			[][]any{
+				{1},
+				{2},
+			},
+			"-- Comment 1.\nUPDATE `test`.`users` SET `a` = 1;\n-- Comment 2.\nUPDATE `test`.`users` SET `b` = 2;\n",
+		},
+		{
+			dialect.Postgres,
+			[]string{
+				"INSERT INTO \"users\" (\"name\", \"email\") VALUES ($1, $2) RETURNING \"id\"",
+				"INSERT INTO \"groups\" (\"name\") VALUES ($1) RETURNING \"id\"",
+			},
+			[]string{
+				"Seed users table",
+				"Seed groups table",
+			},
+			[][]any{
+				{"masseelch", "j@ariga.io"},
+				{"admins"},
+			},
+			strings.Join([]string{
+				"-- Seed users table\nINSERT INTO \"users\" (\"name\", \"email\") VALUES ('masseelch', 'j@ariga.io');\n",
+				"-- Seed groups table\nINSERT INTO \"groups\" (\"name\") VALUES ('admins');\n",
+			}, ""),
+		},
+		{
+			dialect.SQLite,
+			[]string{
+				"INSERT INTO `users` (`name`, `email`) VALUES (?, ?) RETURNING `id`",
+				"INSERT INTO `groups` (`name`) VALUES (?) RETURNING `id`",
+			},
+			[]string{
+				"Seed users table",
+				"Seed groups table",
+			},
+			[][]any{
+				{"masseelch", "j@ariga.io"},
+				{"admins"},
+			},
+			strings.Join([]string{
+				"-- Seed users table\nINSERT INTO `users` (`name`, `email`) VALUES ('masseelch', 'j@ariga.io');\n",
+				"-- Seed groups table\nINSERT INTO `groups` (`name`) VALUES ('admins');\n",
+			}, ""),
+		},
+		{
+			dialect.SQLite + " no space",
+			[]string{"INSERT INTO `users` (`name`) VALUES (?)RETURNING `id`"},
+			[]string{"Seed users table"},
+			[][]any{{"masseelch"}},
+			"-- Seed users table\nINSERT INTO `users` (`name`) VALUES ('masseelch');\n",
+		},
+	} {
+		t.Run(tt.dialect, func(t *testing.T) {
+			var (
+				p   = t.TempDir()
+				dir = func() migrate.Dir {
+					d, err := migrate.NewLocalDir(p)
+					require.NoError(t, err)
+					return d
+				}()
+				w   = &DirWriter{Dir: dir}
+				drv = NewWriteDriver(tt.dialect, w)
+			)
+			for i := range tt.exec {
+				require.NoError(t, drv.Exec(context.Background(), tt.exec[i], tt.args[i], nil))
+				w.Change(tt.comments[i])
+			}
+			require.NoError(t, w.Flush("migration_file"))
+			files, err := os.ReadDir(p)
+			require.NoError(t, err)
+			require.Len(t, files, 2)
+			require.Contains(t, files[0].Name(), "_migration_file.sql")
+			buf, err := os.ReadFile(filepath.Join(p, files[0].Name()))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(buf))
+			require.Equal(t, "atlas.sum", files[1].Name())
+		})
+	}
 }
